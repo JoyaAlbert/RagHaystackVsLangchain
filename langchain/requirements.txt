@@ -1,0 +1,8 @@
+chainlit
+langchain
+chromadb
+sentence-transformers
+google-generativeai
+python-dotenv
+PyPDF2
+pdfplumber

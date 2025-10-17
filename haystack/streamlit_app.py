@@ -32,7 +32,8 @@ def retrieve(query: str, top_k: int = TOP_K):
         return []
     # simple approach: embed query and use collection.query
     model = SentenceTransformer(EMBEDDING_MODEL)
-    q_emb = model.encode([query])[0]
+    # disable progress bar to avoid tqdm writing to stderr inside Streamlit (I/O errors)
+    q_emb = model.encode([query], show_progress_bar=False)[0]
     res = collection.query(query_embeddings=[q_emb], n_results=top_k, include=['documents', 'metadatas'])
     docs = []
     for docs_list in res.get('documents', []):
@@ -102,40 +103,55 @@ def build_prompt(contexts, question):
 
 
 def main():
-    st.title('ENETECH - RAG')
-    # Force the MODEL_NAME (no override)
-    available_model = MODEL_NAME
+    # Top bar layout: small logo at left and title + prompt at the top-right
+    logo_path = os.path.join(os.path.dirname(__file__), 'public', 'ChatGPT_Image_17_oct_2025__17_02_58-removebg-preview.png')
+    # Create two columns: narrow left for logo, wide right for title + input
+    left_col, right_col = st.columns([1, 8])
+    with left_col:
+        try:
+            if os.path.exists(logo_path):
+                # small spacer to nudge the logo down a few pixels, then show logo
+                st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+                st.image(logo_path, use_container_width=False, width=80)
+        except Exception:
+            # ignore missing image or load errors
+            pass
 
-    question = st.text_input('Escribe tu pregunta:')
-    if st.button('Preguntar') and question:
-        with st.spinner('Recuperando documentos...'):
-            docs = retrieve(question)
-        if not docs:
-            st.warning('No hay documentos indexados. Ejecuta el indexador primero.')
-            return
-        # take texts and limit size
-        contexts = docs
-        prompt = build_prompt(contexts, question)
-        with st.spinner('Consultando Gemini...'):
-            try:
-                answer = call_gemini(prompt, available_model)
-            except Exception as e:
-                st.error(f'Error al llamar a Gemini: {e}')
-                # try to list models for the user
-                try:
-                    models = genai.list_models()
-                    st.info('Modelos disponibles:')
-                    for m in models:
-                        st.write(f'- {m.name} (supports: {getattr(m, "capabilities", None)})')
-                except Exception:
-                    st.warning('No se pudieron listar los modelos (problema de autenticación o red).')
+    with right_col:
+        st.title('ENETECH - RAG')
+        # Force the MODEL_NAME (no override)
+        available_model = MODEL_NAME
+
+        question = st.text_input('Escribe tu pregunta:')
+        if st.button('Preguntar') and question:
+            with st.spinner('Recuperando documentos...'):
+                docs = retrieve(question)
+            if not docs:
+                st.warning('No hay documentos indexados. Ejecuta el indexador primero.')
                 return
-        st.subheader('Respuesta')
-        st.write(answer)
-        st.subheader('Contexto usado (fragmentos)')
-        for i, c in enumerate(contexts):
-            st.write(f'Fragmento {i+1}:')
-            st.write(c)
+            # take texts and limit size
+            contexts = docs
+            prompt = build_prompt(contexts, question)
+            with st.spinner('Consultando Gemini...'):
+                try:
+                    answer = call_gemini(prompt, available_model)
+                except Exception as e:
+                    st.error(f'Error al llamar a Gemini: {e}')
+                    # try to list models for the user
+                    try:
+                        models = genai.list_models()
+                        st.info('Modelos disponibles:')
+                        for m in models:
+                            st.write(f'- {m.name} (supports: {getattr(m, "capabilities", None)})')
+                    except Exception:
+                        st.warning('No se pudieron listar los modelos (problema de autenticación o red).')
+                    return
+            st.subheader('Respuesta')
+            st.write(answer)
+            st.subheader('Contexto usado (fragmentos)')
+            for i, c in enumerate(contexts):
+                st.write(f'Fragmento {i+1}:')
+                st.write(c)
 
 
 if __name__ == '__main__':
