@@ -1,0 +1,10 @@
+streamlit
+python-dotenv
+sentence-transformers
+chromadb
+google-generativeai
+PyPDF2
+tqdm
+langchain
+requests
+pdfplumber
