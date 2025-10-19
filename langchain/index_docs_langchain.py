@@ -43,28 +43,40 @@ def index_files(
     if limit:
         files = files[:limit]
 
-    indexed_sources = set()
+    # Obtener rutas ya indexadas y sus hashes (si existen) para evitar re-indexar
+    indexed_sources_hash: dict[str, str] = {}
     try:
         existing = collection.get(include=['metadatas'])
         for mlist in existing.get('metadatas', []):
             for m in mlist:
                 if isinstance(m, dict) and 'source' in m:
-                    indexed_sources.add(os.path.abspath(m['source']))
+                    src = os.path.abspath(m['source'])
+                    src_hash = None
+                    if 'source_hash' in m and m['source_hash']:
+                        src_hash = m['source_hash']
+                    if src and src_hash and src not in indexed_sources_hash:
+                        indexed_sources_hash[src] = src_hash
+                    elif src and src not in indexed_sources_hash:
+                        indexed_sources_hash[src] = None
     except Exception:
-        indexed_sources = set()
+        indexed_sources_hash = {}
 
     total_indexed = 0
     for path in files:
         abs_path = os.path.abspath(path)
-        if abs_path in indexed_sources:
-            logging.info(f'Se omite (ya indexado): {abs_path}')
-            continue
 
         logging.info(f'Procesando: {abs_path}')
         try:
             text = read_file(abs_path)
             if not text or not text.strip():
                 logging.warning(f'Archivo vacio o ilegible: {abs_path}, se omite')
+                continue
+
+            # calcular hash del contenido para detectar cambios y evitar re-indexar
+            path_hash_bytes = hashlib.sha1(text.encode('utf-8')).hexdigest()
+            existing_hash = indexed_sources_hash.get(abs_path)
+            if existing_hash and existing_hash == path_hash_bytes:
+                logging.info(f'Se omite (ya indexado y sin cambios): {abs_path}')
                 continue
 
             chunks = chunk_text(text, chunk_size, chunk_overlap)
@@ -74,9 +86,9 @@ def index_files(
 
             for i in range(0, len(chunks), batch_size):
                 batch_chunks = chunks[i:i + batch_size]
-                path_hash = hashlib.sha1(abs_path.encode('utf-8')).hexdigest()[:12]
-                ids = [f"{path_hash}_{i + j}" for j in range(len(batch_chunks))]
-                metadatas = [{"source": abs_path, "chunk_index": i + j} for j in range(len(batch_chunks))]
+                short_path_hash = hashlib.sha1((abs_path + path_hash_bytes).encode('utf-8')).hexdigest()[:12]
+                ids = [f"{short_path_hash}_{i + j}" for j in range(len(batch_chunks))]
+                metadatas = [{"source": abs_path, "chunk_index": i + j, "source_hash": path_hash_bytes} for j in range(len(batch_chunks))]
                 embeddings = model.encode(batch_chunks, show_progress_bar=False)
                 collection.add(ids=ids, documents=batch_chunks, metadatas=metadatas, embeddings=embeddings)
 
